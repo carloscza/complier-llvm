@@ -6,11 +6,6 @@
 #include <string_view>
 #include "lexer.hpp"
 
-#define ABORT(...) { \
-    std::cerr << "ABORT: " << __VA_ARGS__ << ", " << __LINE__ << " " << __FILE__ << "\n"; \
-    __builtin_trap(); \
- }
-
 namespace my_lexer
 {
     static IDManager ids;

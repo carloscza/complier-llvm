@@ -9,6 +9,11 @@
 #include <unordered_map>
 #include <cstdint>
 
+#define ABORT(...) { \
+    std::cerr << "ABORT: " << __VA_ARGS__ << ", " << __LINE__ << " " << __FILE__ << "\n"; \
+    __builtin_trap(); \
+ }
+
 namespace my_lexer
 {
     using u8 = unsigned char;            // create an alias/type-def for an '8-bit unsigned integer' (ie., a byte).
@@ -95,7 +100,6 @@ namespace my_lexer
             std::vector<std::vector<u8>> id_to_string;
             std::unordered_map<std::string_view, size_t> string_to_id;
     };
-    
 } // end my_lexer namespace
 
 #endif
