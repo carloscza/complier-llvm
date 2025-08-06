@@ -96,7 +96,6 @@ namespace my_lexer
             std::unordered_map<std::string_view, size_t> string_to_id;
     };
     
-    static IDManager ids;
 } // end my_lexer namespace
 
 #endif

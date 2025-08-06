@@ -13,6 +13,8 @@
 
 namespace my_lexer
 {
+    static IDManager ids;
+
     void Lexer::init_keywords()
     {
         auto init_keyword = [&](std::string_view name, int value)
