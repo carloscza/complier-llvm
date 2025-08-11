@@ -1,7 +1,7 @@
 .SILENT:
 
 LLVM_FLAGS=-fuse-ld=lld `llvm-config --cxxflags` `llvm-config --ldflags --libs all bitwriter core support` -lz
-WARN=-Wall -Wno-multichar -Wno-c23-extensions -Wno-unqualified-std-cast-call -Wno-unused-function
+WARN=-Wall -Wno-multichar -Wno-c23-extensions -Wno-unqualified-std-cast-call -Wno-unused-function -Wno-deprecated-declarations
 SANITIZER=-g -g3 -fsanitize=address
 OPT=-O3 -fno-rtti -ffast-math -mtune=native -march=native
 
