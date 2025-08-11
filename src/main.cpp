@@ -1,7 +1,8 @@
 #include <iostream>
 #include "lexer.cpp"
-#include "tools.cpp"
+#include "tools.hpp"
 #include "parser.hpp"
+#include "codegen.hpp"
 
 // Use 'constexpr' to guarantee that the compiler constructs the 'test_case[]' array..
 // at compile time.
@@ -15,7 +16,6 @@ static my_lexer::u8 test_case[] = {
 
 int main(void)
 {
-    my_parser::Program prog = my_parser::Parser{test_case}();
-
+    llvm::Compiler{(my_lexer::u8 *)test_case};
     return 0;
 }

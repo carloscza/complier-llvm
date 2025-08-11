@@ -21,10 +21,8 @@ namespace my_lexer
     static_assert(CHAR_BIT   == 8);      // assert that 1 byte is 8 bits.
     using i32 = int32_t;                 // create an alias/type-def for an '32-bit signed integer'.
 
-    // Lexer:
     struct Lexer
     {
-        // Constructor:
         Lexer(u8 *lex_iter)
             :lex_iter{lex_iter}
         {
@@ -32,12 +30,9 @@ namespace my_lexer
             head = lex();
         }
 
-        // Overloading Operators:
         int  operator*()  { return head;  }
         void operator++() { head = lex(); }
-        
-        // Member Methods:
-        i32 get_value() { return value; }
+        i32  get_value()  { return value; }
 
         private:
             u8 *lex_iter;

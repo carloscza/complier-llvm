@@ -1,3 +1,5 @@
+#ifndef MYTOOLS_HPP
+#define MYTOOLS_HPP
 #include<string>
 
 namespace my_tools
@@ -12,3 +14,4 @@ namespace my_tools
         return s;
     }
 } // END my_tools namespace
+#endif

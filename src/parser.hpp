@@ -37,18 +37,18 @@ namespace my_parser
             : lex{text}
         {}
         
-        Program operator()() { return parse_program(); }
-        
-        private:
-            my_lexer::Lexer lex;
-
-            my_lexer::i32 expect (int token)
+        my_lexer::i32 expect (int token)
             {
                 if (token != *lex) [[unlikely]] { ABORT("You've done a bad thing mr crabs."); }
                 my_lexer::i32 res = lex.get_value();
                 ++lex;
                 return res;
             }
+
+        Program operator()() { return parse_program(); }
+        
+        private:
+            my_lexer::Lexer lex;
 
             Program parse_program()
             {
