@@ -10,12 +10,13 @@
 // into the binary.  
 // Using 'u8' to store raw bytes of chars of the embedded file since using latin-1 intepretation.
 static my_lexer::u8 test_case[] = {
-    #embed "../tests/calc.c"
+    #embed "../tests/control_flow_calc.c"
     ,0
 };
 
 int main(void)
 {
+    //my_parser::Parser{test_case}();
     llvm::Compiler{(my_lexer::u8 *)test_case};
     return 0;
 }

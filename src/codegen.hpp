@@ -53,6 +53,8 @@ namespace llvm
             std::unordered_map<std::string, Function *> functions;
             std::unordered_map<std::string, Value *> formats;
 
+            std::vector<BasicBlock*> continue_stack, break_stack;
+
             Value* get_fmt(const char *fmt)
             {
                 Value *&res = formats[fmt];
@@ -61,9 +63,71 @@ namespace llvm
             }
 
             void gen_prog(my_parser::Program& p) { for(auto& s : p.body) { gen_stmt(s); } }
+
             void gen_stmt(my_parser::Stmt& s) 
             {
-                builder.CreateCall(functions["printf"], {get_fmt("%d\n"), gen_expr(s.body)});
+                if(builder.GetInsertBlock()->getTerminator()) { return; }
+
+                auto gen_block = [&](my_parser::Block& block){
+                    for(auto& s : block.body) { gen_stmt(s); }
+                };
+                s(
+                    gen_block,
+                    [&](my_parser::Break& stmt){
+                        if(!break_stack.size()) { ABORT("Break outside of a loop"); }
+                        builder.CreateBr(break_stack.back());
+                    },
+                    [&](my_parser::Continue& stmt){
+                        if(!continue_stack.size()) { ABORT("Continue outside of a loop"); }
+                        builder.CreateBr(continue_stack.back());
+                    },
+                    [&](my_parser::Loop& stmt){
+                        BasicBlock *current_block = builder.GetInsertBlock();
+                        BasicBlock *loop_block = BasicBlock::Create(ctx, "", current_block->getParent());
+                        BasicBlock *merge_block = BasicBlock::Create(ctx, "", current_block->getParent());
+
+                        continue_stack.push_back(loop_block);
+                        break_stack.push_back(merge_block);
+
+                        builder.CreateBr(loop_block);
+
+                        builder.SetInsertPoint(loop_block);
+                        gen_block(stmt.body);
+
+                        if(!builder.GetInsertBlock()->getTerminator()) {
+                            builder.CreateBr(loop_block);
+                        }
+
+                        builder.SetInsertPoint(merge_block);
+
+                        continue_stack.pop_back();
+                        break_stack.pop_back();
+                    },
+                    [&](my_parser::If& stmt){
+                        BasicBlock *current_block = builder.GetInsertBlock();
+                        BasicBlock *if_block = BasicBlock::Create(ctx, "", current_block->getParent());
+                        BasicBlock *else_block = BasicBlock::Create(ctx, "", current_block->getParent());
+                        BasicBlock *merge_block = BasicBlock::Create(ctx, "", current_block->getParent()); 
+
+                        Value *cond = i32toi1(gen_expr(stmt.cond[0]));
+                        builder.CreateCondBr(cond, if_block, else_block);
+
+                        builder.SetInsertPoint(if_block);
+                        gen_block(stmt.body);
+                        if(!builder.GetInsertBlock()->getTerminator()) { builder.CreateBr(merge_block); }
+
+                        builder.SetInsertPoint(else_block);
+
+                        if(stmt.else_body) { gen_block(*stmt.else_body); }
+                        if(!builder.GetInsertBlock()->getTerminator()) { builder.CreateBr(merge_block); }
+
+                        builder.SetInsertPoint(merge_block);
+                    },
+                    [&](my_parser::Nop& stmt){},
+                    [&](my_parser::Expr& expr){
+                        builder.CreateCall(functions["printf"], {get_fmt("%d\n"), gen_expr(expr)});
+                    }
+                );
             }
 
             void setup()

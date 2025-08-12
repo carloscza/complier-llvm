@@ -6,6 +6,8 @@
 #include <variant>
 #include "lexer.hpp"
 #include <vector>
+#include <optional>
+
 
 namespace my_parser
 {
@@ -28,7 +30,18 @@ namespace my_parser
     struct IntLiteral { my_lexer::i32 body; };
     struct MathOp { int op; std::vector<Expr> body; };
     struct Expr : public Var<IntLiteral, MathOp> { using Var<IntLiteral, MathOp>::Var; };
-    struct Stmt { Expr body; };
+    
+    struct Stmt;
+
+    struct Block { std::vector<Stmt> body; };
+    struct Break {};
+    struct Continue {};
+    struct Loop { Block body; }; 
+    struct If { std::vector<Expr> cond; Block body; std::optional<Block> else_body; };
+    struct Nop {};
+    struct Stmt : public Var<Block, Break, Continue, Loop, If, Nop, Expr> {
+        using Var<Block, Break, Continue, Loop, If, Nop, Expr>::Var;
+    };
     struct Program { std::vector<Stmt> body; };
 
     struct Parser
@@ -57,12 +70,45 @@ namespace my_parser
                 return p;
             }
 
+            Block parse_block()
+            {
+                expect('{');
+                std::vector<Stmt> body;
+                while(*lex && *lex != '}') { body.push_back(parse_stmt()); }
+                expect('}');
+                return Block{std::move(body)};
+            }
+
             Stmt parse_stmt() 
             {
-                Stmt s;
-                s.body = parse_expr();
-                expect(';');
-                return s;
+                switch(*lex)
+                {
+                    case 'brk': { ++lex; expect(';'); return Break{}; } break;
+                    case 'cont': { ++lex; expect(';'); return Continue{}; } break;
+                    case 'loop': { ++lex; return Loop{parse_block()}; } break;
+                    case '{': { return parse_block(); } break;
+                    case ';': { ++lex; return Nop{}; } break;
+                    case 'if': 
+                    {
+                        ++lex;
+                        Expr cond = parse_expr();
+                        Block body = parse_block();
+                        std::optional<Block> else_body;
+                        if(*lex == 'else')
+                        {
+                            ++lex;
+                            else_body = parse_block();
+                        }
+                        return If{{std::move(cond)}, std::move(body), std::move(else_body)};
+
+                    } break;
+                    default:
+                    {
+                        auto lhs = parse_expr();
+                        expect(';');
+                        return lhs;
+                    } break;
+                }
             }
 
             Expr parse_expr() { return parse_or(); }
