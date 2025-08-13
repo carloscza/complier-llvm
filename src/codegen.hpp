@@ -69,7 +69,7 @@ namespace llvm
                 if(builder.GetInsertBlock()->getTerminator()) { return; }
 
                 auto gen_block = [&](my_parser::Block& block){
-                    for(auto& s : block.body) { gen_stmt(s); }
+                    for(auto& s : block.body) { gen_stmt(s); } // create IR for each stmt in block.
                 };
                 s(
                     gen_block,
@@ -84,44 +84,45 @@ namespace llvm
                         builder.CreateBr(continue_stack.back());
                     },
                     [&](my_parser::Loop& stmt){
-                        BasicBlock *current_block = builder.GetInsertBlock();
-                        BasicBlock *loop_block    = BasicBlock::Create(ctx, "", current_block->getParent());
-                        BasicBlock *merge_block   = BasicBlock::Create(ctx, "", current_block->getParent());
+                        BasicBlock *current_block = builder.GetInsertBlock(); // save bb before loop.
+                        BasicBlock *loop_block    = BasicBlock::Create(ctx, "", current_block->getParent()); // create new bb for loop block.
+                        BasicBlock *merge_block   = BasicBlock::Create(ctx, "", current_block->getParent()); // create new bb for block after loop.
 
-                        continue_stack.push_back(loop_block); // Push loop block to stack (continue branches to top of loop block).
-                        break_stack.push_back(merge_block);   // Push next sequential block to stack (break branche to next block).
+                        continue_stack.push_back(loop_block); // push loop block to stack (continue branches to top of loop block).
+                        break_stack.push_back(merge_block);   // push next sequential block to stack (break branche to next block).
 
                         builder.CreateBr(loop_block);         // start loop.
 
-                        builder.SetInsertPoint(loop_block);
-                        gen_block(stmt.body);
+                        builder.SetInsertPoint(loop_block);   // point/move builder to loop block to inster IR for its body.
+                        gen_block(stmt.body);                 // make IR for loop block instructions.
 
                         if(!builder.GetInsertBlock()->getTerminator()) { builder.CreateBr(loop_block); } // keep branching to top of loop if no terminator (break/continue).
+                        
+                        // loop done.
+                        builder.SetInsertPoint(merge_block);  // point/move builder to block after loop. 
 
-                        builder.SetInsertPoint(merge_block); 
-
-                        continue_stack.pop_back();
-                        break_stack.pop_back();
+                        continue_stack.pop_back();            // pop last loop block.
+                        break_stack.pop_back();               // pop last loop block.
                     },
                     [&](my_parser::If& stmt){
-                        BasicBlock *current_block = builder.GetInsertBlock();
-                        BasicBlock *if_block = BasicBlock::Create(ctx, "", current_block->getParent());
-                        BasicBlock *else_block = BasicBlock::Create(ctx, "", current_block->getParent());
-                        BasicBlock *merge_block = BasicBlock::Create(ctx, "", current_block->getParent()); 
+                        BasicBlock *current_block = builder.GetInsertBlock(); // save bb before if-stmt.
+                        BasicBlock *if_block = BasicBlock::Create(ctx, "", current_block->getParent()); // create new bb for if-block
+                        BasicBlock *else_block = BasicBlock::Create(ctx, "", current_block->getParent()); // create new bb for else-block
+                        BasicBlock *merge_block = BasicBlock::Create(ctx, "", current_block->getParent()); // create new bb for block after if-else.
 
-                        Value *cond = i32toi1(gen_expr(stmt.cond[0]));
-                        builder.CreateCondBr(cond, if_block, else_block);
+                        Value *cond = i32toi1(gen_expr(stmt.cond[0]));  // convert 32-bit to 1-bit for cond-br.
+                        builder.CreateCondBr(cond, if_block, else_block); // cond-branch to if-block or else-block based on cond.
 
-                        builder.SetInsertPoint(if_block);
-                        gen_block(stmt.body);
-                        if(!builder.GetInsertBlock()->getTerminator()) { builder.CreateBr(merge_block); }
+                        builder.SetInsertPoint(if_block); // point/move builder to if-block bb.
+                        gen_block(stmt.body);             // make IR for if-block (goes in if-block bb).
+                        if(!builder.GetInsertBlock()->getTerminator()) { builder.CreateBr(merge_block); } // branch to bb after if-else stmt.
 
-                        builder.SetInsertPoint(else_block);
+                        builder.SetInsertPoint(else_block); // point/move builder to else-block bb.
 
-                        if(stmt.else_body) { gen_block(*stmt.else_body); }
-                        if(!builder.GetInsertBlock()->getTerminator()) { builder.CreateBr(merge_block); }
+                        if(stmt.else_body) { gen_block(*stmt.else_body); } // make IR for else-block.
+                        if(!builder.GetInsertBlock()->getTerminator()) { builder.CreateBr(merge_block); } // branch to bb after if-else stmt (bc no fall through).
 
-                        builder.SetInsertPoint(merge_block);
+                        builder.SetInsertPoint(merge_block); // move/point builder to bb after if-else stmt.
                     },
                     [&](my_parser::Nop& stmt){},
                     [&](my_parser::Expr& expr){
