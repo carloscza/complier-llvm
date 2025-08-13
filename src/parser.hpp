@@ -7,6 +7,7 @@
 #include "lexer.hpp"
 #include <vector>
 #include <optional>
+#include <iostream>
 
 
 namespace my_parser
@@ -70,39 +71,48 @@ namespace my_parser
                 return p;
             }
 
+            // BLOCK -> '{' STMT* '}'
             Block parse_block()
             {
                 expect('{');
                 std::vector<Stmt> body;
-                while(*lex && *lex != '}') { body.push_back(parse_stmt()); }
+                while(*lex && *lex != '}') { body.push_back(parse_stmt()); }  
                 expect('}');
                 return Block{std::move(body)};
             }
 
+            /*
+            STMT -> 'break' ';'
+                | 'continue' ';'
+                | 'loop' BLOCK
+                |  BLOCK
+                | ';'
+                | 'if' EXPR BLOCK ('else' BLOCK)?
+                |  EXPR ';'
+            */
             Stmt parse_stmt() 
             {
                 switch(*lex)
                 {
-                    case 'brk': { ++lex; expect(';'); return Break{}; } break;
-                    case 'cont': { ++lex; expect(';'); return Continue{}; } break;
-                    case 'loop': { ++lex; return Loop{parse_block()}; } break;
-                    case '{': { return parse_block(); } break;
-                    case ';': { ++lex; return Nop{}; } break;
-                    case 'if': 
+                    case 'brk':  { ++lex; expect(';'); return Break{};    } break; // 'break' ';'
+                    case 'cont': { ++lex; expect(';'); return Continue{}; } break; // 'continue' ';'
+                    case 'loop': { ++lex; return Loop{parse_block()};     } break; // 'loop' BLOCK
+                    case '{':    { return parse_block();  } break;                 //  BLOCK
+                    case ';':    { ++lex; return Nop{};   } break;                 //  ';'
+                    case 'if':                                                     //  'if' EXPR BLOCK ('else' BLOCK)? 
                     {
-                        ++lex;
-                        Expr cond = parse_expr();
-                        Block body = parse_block();
+                        ++lex;                                                     // 'if'
+                        Expr cond  = parse_expr();                                 // EXPR
+                        Block body = parse_block();                                // BLOCK
                         std::optional<Block> else_body;
                         if(*lex == 'else')
                         {
-                            ++lex;
-                            else_body = parse_block();
+                            ++lex;                                                 // 'else'
+                            else_body = parse_block();                             // BLOCK
                         }
-                        return If{{std::move(cond)}, std::move(body), std::move(else_body)};
-
+                        return If{{std::move(cond)}, std::move(body), std::move(else_body)}; // return If struct.
                     } break;
-                    default:
+                    default:                                                       // EXPR ';'
                     {
                         auto lhs = parse_expr();
                         expect(';');

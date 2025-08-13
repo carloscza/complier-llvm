@@ -74,31 +74,31 @@ namespace llvm
                 s(
                     gen_block,
                     [&](my_parser::Break& stmt){
-                        if(!break_stack.size()) { ABORT("Break outside of a loop"); }
+                        if(!break_stack.size()) { ABORT("Break outside of a loop"); } // if no loop stmt (empty). Nowhere to branch to.
+                                                                                      // break; causes a branch.
                         builder.CreateBr(break_stack.back());
                     },
                     [&](my_parser::Continue& stmt){
-                        if(!continue_stack.size()) { ABORT("Continue outside of a loop"); }
+                        if(!continue_stack.size()) { ABORT("Continue outside of a loop"); } // if no loop stmt (empty). Nowhere to branch to.
+                                                                                            // continue; causes a branch.
                         builder.CreateBr(continue_stack.back());
                     },
                     [&](my_parser::Loop& stmt){
                         BasicBlock *current_block = builder.GetInsertBlock();
-                        BasicBlock *loop_block = BasicBlock::Create(ctx, "", current_block->getParent());
-                        BasicBlock *merge_block = BasicBlock::Create(ctx, "", current_block->getParent());
+                        BasicBlock *loop_block    = BasicBlock::Create(ctx, "", current_block->getParent());
+                        BasicBlock *merge_block   = BasicBlock::Create(ctx, "", current_block->getParent());
 
-                        continue_stack.push_back(loop_block);
-                        break_stack.push_back(merge_block);
+                        continue_stack.push_back(loop_block); // Push loop block to stack (continue branches to top of loop block).
+                        break_stack.push_back(merge_block);   // Push next sequential block to stack (break branche to next block).
 
-                        builder.CreateBr(loop_block);
+                        builder.CreateBr(loop_block);         // start loop.
 
                         builder.SetInsertPoint(loop_block);
                         gen_block(stmt.body);
 
-                        if(!builder.GetInsertBlock()->getTerminator()) {
-                            builder.CreateBr(loop_block);
-                        }
+                        if(!builder.GetInsertBlock()->getTerminator()) { builder.CreateBr(loop_block); } // keep branching to top of loop if no terminator (break/continue).
 
-                        builder.SetInsertPoint(merge_block);
+                        builder.SetInsertPoint(merge_block); 
 
                         continue_stack.pop_back();
                         break_stack.pop_back();
