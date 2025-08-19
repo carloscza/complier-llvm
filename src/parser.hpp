@@ -30,7 +30,9 @@ namespace my_parser
     struct Expr;
     struct IntLiteral { my_lexer::i32 body; };
     struct MathOp { int op; std::vector<Expr> body; };
-    struct Expr : public Var<IntLiteral, MathOp> { using Var<IntLiteral, MathOp>::Var; };
+    struct Variable { my_lexer::i32 name; };
+    struct Array { my_lexer::i32 name; std::vector<Expr> size; };
+    struct Expr : public Var<IntLiteral, MathOp, Variable, Array> { using Var<IntLiteral, MathOp, Variable, Array>::Var; };
     
     struct Stmt;
 
@@ -40,8 +42,13 @@ namespace my_parser
     struct Loop { Block body; }; 
     struct If { std::vector<Expr> cond; Block body; std::optional<Block> else_body; };
     struct Nop {};
-    struct Stmt : public Var<Block, Break, Continue, Loop, If, Nop, Expr> {
-        using Var<Block, Break, Continue, Loop, If, Nop, Expr>::Var;
+    
+
+    struct Let { Expr body; };
+    struct Assign { Expr lhs, rhs; };
+
+    struct Stmt : public Var<Block, Break, Continue, Loop, If, Nop, Expr, Let, Assign> {
+        using Var<Block, Break, Continue, Loop, If, Nop, Expr, Let ,Assign>::Var;
     };
     struct Program { std::vector<Stmt> body; };
 
@@ -89,6 +96,8 @@ namespace my_parser
                 | ';'
                 | 'if' EXPR BLOCK ('else' BLOCK)?
                 |  EXPR ';'
+                | 'let' VARIABLE ';'
+                |  EXPR '=' EXPR ';'
             */
             Stmt parse_stmt() 
             {
@@ -112,17 +121,52 @@ namespace my_parser
                         }
                         return If{{std::move(cond)}, std::move(body), std::move(else_body)}; // return If struct.
                     } break;
+                    case 'let': { ++lex; return Let{parse_variable()}; } break;   // 'let VARIABLE ';'
                     default:                                                       // EXPR ';'
                     {
                         auto lhs = parse_expr();
+                        // Check if an Assign stmt:
+                        if ( *lex == '=')
+                        {
+                            ++lex;
+                            auto rhs = parse_expr();              // get rhs expression being assigned to lhs.
+                            expect(';');
+                            return Assign{move(lhs), move(rhs)};  // return assignment.
+                        }
                         expect(';');
-                        return lhs;
+                        return lhs;                               // otherwise, just an expression.
                     } break;
                 }
             }
 
             Expr parse_expr() { return parse_or(); }
-            
+
+
+            // VARIABLE -> ID ('[' EXPR ']')?
+            Expr parse_variable()
+            {
+                my_lexer::i32 name = expect('id');
+
+                // Check whether Array or Variable:
+                // Bracket means Array:
+                if(*lex == '[')
+                {
+                    ++lex;
+                    auto size = parse_expr();
+                    expect(']');
+                    return Array{name, {move(size)}}; // return array.
+                }
+
+                // Its a Variable:
+                return Variable{name}; // return variable.
+            }
+
+
+            /*
+            PRIMARY -> INT
+                    |  VARIABLE            
+                    |  '(' EXPR ')'
+            */
             Expr parse_primary()
             {
                 if ('(' == *lex)
@@ -130,9 +174,10 @@ namespace my_parser
                     ++lex;
                     Expr res = parse_expr();
                     expect(')');
-                    return res;
+                    return res;                                   // EXPR
                 }
-                return IntLiteral{expect('int')};
+                if ('id' == *lex) { return parse_variable(); }    // VARIABLE
+                return IntLiteral{expect('int')};                 // INT
             }
 
             Expr parse_unary()

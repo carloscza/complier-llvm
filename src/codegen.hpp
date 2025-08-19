@@ -55,6 +55,37 @@ namespace llvm
 
             std::vector<BasicBlock*> continue_stack, break_stack;
 
+            struct SymbolTable
+            {
+                struct Symbol
+                {
+                    Value *alloca;
+                    bool is_array;
+                };
+
+                SymbolTable() { ++(*this); } // Global scope is a scope and must track.
+
+                void operator++() { tables.push_back({}); } // push scope to stack.
+                void operator--() { tables.pop_back();    } // pop scope from stack.
+
+                Symbol operator[](my_lexer::i32 name)
+                {
+                    // Search for variable within scopes in the stack of scopes.
+                    for (size_t i = tables.size() - 1 ; i != (size_t)-1 ; --i)
+                    {
+                        if(tables[i].contains(name)) { return tables[i][name]; }
+                    }
+
+                    // Search did not find variable.
+                    ABORT("Failed to find symbol " << my_lexer::ids[name]);
+                }
+                
+                void push(my_lexer::i32 name, Value *alloca, bool is_array) { tables.back()[name] = {alloca, is_array}; }
+
+                private:
+                    std::vector<std::unordered_map<my_lexer::i32, Symbol>> tables;
+            } symbols;
+
             Value* get_fmt(const char *fmt)
             {
                 Value *&res = formats[fmt];
@@ -69,10 +100,49 @@ namespace llvm
                 if(builder.GetInsertBlock()->getTerminator()) { return; }
 
                 auto gen_block = [&](my_parser::Block& block){
+                    ++symbols; // push the block's scope on to stack of scopes.
                     for(auto& s : block.body) { gen_stmt(s); } // create IR for each stmt in block.
+                    --symbols; // pop its scope.
                 };
                 s(
                     gen_block,
+                    [&](my_parser::Let& let) {
+                        let.body(
+                            [&](my_parser::Variable& v) {
+                                AllocaInst *alloca = builder.CreateAlloca(builder.getInt32Ty(), nullptr, "");
+                                symbols.push(v.name, alloca, false);
+                            },
+                            [&](my_parser::Array& arr) {
+                                arr.size[0](
+                                    [&](my_parser::IntLiteral& lit) {
+                                        AllocaInst *alloca = builder.CreateAlloca(builder.getInt32Ty(), builder.getInt32(lit.body), "");
+                                        symbols.push(arr.name, alloca, true);
+                                    },
+                                    [&](auto&) { ABORT("Tried to declare array with non IntLiteral size"); }
+                                );
+                            },
+                            [&](auto&){ ABORT ("Let tried to declare non var or array"); }
+                        );
+                    },
+                    [&](my_parser::Assign& ass) {
+                        ass.lhs(
+                            [&](my_parser::Variable& v) {
+                                Value *rhs = gen_expr(ass.rhs);
+                                auto symbol = symbols[v.name];
+                                if(symbol.is_array) { ABORT("Tried to assign to a variable as array"); }
+                                builder.CreateStore(rhs, symbol.alloca);
+                            },
+                            [&](my_parser::Array& arr) {
+                                Value *rhs = gen_expr(ass.rhs);
+                                auto symbol = symbols[arr.name];
+                                if(!symbol.is_array) { ABORT("Tried to assign to array as variable"); }
+                                Value *index = gen_expr(arr.size[0]);
+                                Value *gep = builder.CreateGEP(builder.getInt32Ty(), symbol.alloca, index);
+                                builder.CreateStore(rhs, gep);
+                            },
+                            [&](auto&){ ABORT("Assigning to non var or array?"); }
+                        );
+                    },
                     [&](my_parser::Break& stmt){
                         if(!break_stack.size()) { ABORT("Break outside of a loop"); } // if no loop stmt (empty). Nowhere to branch to.
                                                                                       // break; causes a branch.
@@ -159,6 +229,18 @@ namespace llvm
             Value* gen_expr(my_parser::Expr& e)
             {
                 return e (
+                    [&](my_parser::Variable& v) -> Value * {
+                        auto symbol = symbols[v.name];
+                        if(symbol.is_array) { ABORT("We're not going to allow pointer math, simplifies our type system"); }
+                        return builder.CreateLoad(builder.getInt32Ty(), symbol.alloca);
+                    },
+                    [&](my_parser::Array& arr) -> Value * {
+                        auto symbol = symbols[arr.name];
+                        if(!symbol.is_array) { ABORT("We don't have index operator overloads"); }
+                        Value *index = gen_expr(arr.size[0]);
+                        Value *gep = builder.CreateGEP(builder.getInt32Ty(), symbol.alloca, index);
+                        return builder.CreateLoad(builder.getInt32Ty(), gep);
+                    }, 
                     [&](my_parser::IntLiteral& lit) -> Value* { return builder.getInt32(lit.body); },
                     [&](my_parser::MathOp& op) {
                         if(op.op == '||' || op.op == '&&')
