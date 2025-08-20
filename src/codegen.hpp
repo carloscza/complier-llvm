@@ -55,13 +55,18 @@ namespace llvm
 
             std::vector<BasicBlock*> continue_stack, break_stack;
 
+
+
+
             struct SymbolTable
             {
+                // Variable/Array struct:
                 struct Symbol
                 {
-                    Value *alloca;
-                    bool is_array;
+                    Value *alloca; // mem location of var/arr
+                    bool is_array; // var or arr ?
                 };
+
 
                 SymbolTable() { ++(*this); } // Global scope is a scope and must track.
 
@@ -70,21 +75,27 @@ namespace llvm
 
                 Symbol operator[](my_lexer::i32 name)
                 {
-                    // Search for variable within scopes in the stack of scopes.
+                    // Search for variable within each scope in the stack of scopes.
                     for (size_t i = tables.size() - 1 ; i != (size_t)-1 ; --i)
                     {
                         if(tables[i].contains(name)) { return tables[i][name]; }
                     }
 
-                    // Search did not find variable.
+                    // Search did not find variable/array.
                     ABORT("Failed to find symbol " << my_lexer::ids[name]);
                 }
                 
-                void push(my_lexer::i32 name, Value *alloca, bool is_array) { tables.back()[name] = {alloca, is_array}; }
+                void push(my_lexer::i32 name, Value *alloca, bool is_array) { tables.back()[name] = {alloca, is_array}; } // pushing variables/arrays in tables/scopes.
 
                 private:
-                    std::vector<std::unordered_map<my_lexer::i32, Symbol>> tables;
-            } symbols;
+                    std::vector<std::unordered_map<my_lexer::i32, Symbol>> tables; // a vector of scopes. outer index scope level. inner index var name.
+
+            } symbols; // declare a SymbolTable named 'symbols'
+
+
+
+
+
 
             Value* get_fmt(const char *fmt)
             {
@@ -95,50 +106,51 @@ namespace llvm
 
             void gen_prog(my_parser::Program& p) { for(auto& s : p.body) { gen_stmt(s); } }
 
+
             void gen_stmt(my_parser::Stmt& s) 
             {
                 if(builder.GetInsertBlock()->getTerminator()) { return; }
 
                 auto gen_block = [&](my_parser::Block& block){
-                    ++symbols; // push the block's scope on to stack of scopes.
+                    ++symbols; // push the block's scope on to stack of scopes (an empty hash table).
                     for(auto& s : block.body) { gen_stmt(s); } // create IR for each stmt in block.
-                    --symbols; // pop its scope.
+                    --symbols; // pop its scope/hash table.
                 };
                 s(
                     gen_block,
-                    [&](my_parser::Let& let) {
+                    [&](my_parser::Let& let) { // Generate IR for 'let' stmts.
                         let.body(
                             [&](my_parser::Variable& v) {
-                                AllocaInst *alloca = builder.CreateAlloca(builder.getInt32Ty(), nullptr, "");
-                                symbols.push(v.name, alloca, false);
+                                AllocaInst *alloca = builder.CreateAlloca(builder.getInt32Ty(), nullptr, ""); // allocate mem for a single 32-bit.
+                                symbols.push(v.name, alloca, false); // push variable to current scope hash table to track.
                             },
                             [&](my_parser::Array& arr) {
-                                arr.size[0](
+                                arr.size[0]( // an expr
                                     [&](my_parser::IntLiteral& lit) {
-                                        AllocaInst *alloca = builder.CreateAlloca(builder.getInt32Ty(), builder.getInt32(lit.body), "");
-                                        symbols.push(arr.name, alloca, true);
+                                        AllocaInst *alloca = builder.CreateAlloca(builder.getInt32Ty(), builder.getInt32(lit.body), ""); // allocate mem for IntLiteral many 32-bits.
+                                        symbols.push(arr.name, alloca, true); // push variable to current scope hash table.
                                     },
-                                    [&](auto&) { ABORT("Tried to declare array with non IntLiteral size"); }
+                                    [&](auto&) { ABORT("Tried to declare array with non IntLiteral size"); } // enforce constant int size for array declaration.
                                 );
                             },
                             [&](auto&){ ABORT ("Let tried to declare non var or array"); }
                         );
                     },
-                    [&](my_parser::Assign& ass) {
+                    [&](my_parser::Assign& ass) { // Generate IR for Assign stmts.
                         ass.lhs(
-                            [&](my_parser::Variable& v) {
-                                Value *rhs = gen_expr(ass.rhs);
-                                auto symbol = symbols[v.name];
-                                if(symbol.is_array) { ABORT("Tried to assign to a variable as array"); }
-                                builder.CreateStore(rhs, symbol.alloca);
+                            [&](my_parser::Variable& v) {   // lhs expr is a variable
+                                Value *rhs = gen_expr(ass.rhs); // get rhs expr
+                                auto symbol = symbols[v.name]; //  check if variable exists/declared (if not SymbolTable op[] handles with ABORT).
+                                if(symbol.is_array) { ABORT("Tried to assign to a variable as array"); } // "variable"(identifier) is actually an array so can't assign.
+                                builder.CreateStore(rhs, symbol.alloca); // store rhs into lhs mem location.
                             },
-                            [&](my_parser::Array& arr) {
-                                Value *rhs = gen_expr(ass.rhs);
-                                auto symbol = symbols[arr.name];
-                                if(!symbol.is_array) { ABORT("Tried to assign to array as variable"); }
-                                Value *index = gen_expr(arr.size[0]);
-                                Value *gep = builder.CreateGEP(builder.getInt32Ty(), symbol.alloca, index);
-                                builder.CreateStore(rhs, gep);
+                            [&](my_parser::Array& arr) {  // lhs expr is an array.
+                                Value *rhs = gen_expr(ass.rhs); // get rhs expr.
+                                auto symbol = symbols[arr.name]; // check is exists/declared.
+                                if(!symbol.is_array) { ABORT("Tried to assign to array as variable"); } // identifier was used like an array but not array so can't assign.
+                                Value *index = gen_expr(arr.size[0]); // generate array's index which is an expr.
+                                Value *gep = builder.CreateGEP(builder.getInt32Ty(), symbol.alloca, index); // calculate mem location of array index (offset).
+                                builder.CreateStore(rhs, gep); // store rhs into array location.
                             },
                             [&](auto&){ ABORT("Assigning to non var or array?"); }
                         );
@@ -229,17 +241,17 @@ namespace llvm
             Value* gen_expr(my_parser::Expr& e)
             {
                 return e (
-                    [&](my_parser::Variable& v) -> Value * {
-                        auto symbol = symbols[v.name];
-                        if(symbol.is_array) { ABORT("We're not going to allow pointer math, simplifies our type system"); }
-                        return builder.CreateLoad(builder.getInt32Ty(), symbol.alloca);
+                    [&](my_parser::Variable& v) -> Value * { // Expr is variable
+                        auto symbol = symbols[v.name]; // check if var exists/declared
+                        if(symbol.is_array) { ABORT("We're not going to allow pointer math, simplifies our type system"); } // variable actually an array so it would be mem address (pointer). not allowed in lang.
+                        return builder.CreateLoad(builder.getInt32Ty(), symbol.alloca); // load value of variable to register.
                     },
-                    [&](my_parser::Array& arr) -> Value * {
-                        auto symbol = symbols[arr.name];
-                        if(!symbol.is_array) { ABORT("We don't have index operator overloads"); }
-                        Value *index = gen_expr(arr.size[0]);
-                        Value *gep = builder.CreateGEP(builder.getInt32Ty(), symbol.alloca, index);
-                        return builder.CreateLoad(builder.getInt32Ty(), gep);
+                    [&](my_parser::Array& arr) -> Value * { // Expr is an array
+                        auto symbol = symbols[arr.name]; // check if exists
+                        if(!symbol.is_array) { ABORT("We don't have index operator overloads"); } // using variable as array. does not have [] operator overloads.
+                        Value *index = gen_expr(arr.size[0]); // generate index (an expr).
+                        Value *gep = builder.CreateGEP(builder.getInt32Ty(), symbol.alloca, index); // get correct location withing array (offset).
+                        return builder.CreateLoad(builder.getInt32Ty(), gep); // load array value into register.
                     }, 
                     [&](my_parser::IntLiteral& lit) -> Value* { return builder.getInt32(lit.body); },
                     [&](my_parser::MathOp& op) {

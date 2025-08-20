@@ -30,8 +30,12 @@ namespace my_parser
     struct Expr;
     struct IntLiteral { my_lexer::i32 body; };
     struct MathOp { int op; std::vector<Expr> body; };
-    struct Variable { my_lexer::i32 name; };
-    struct Array { my_lexer::i32 name; std::vector<Expr> size; };
+
+    struct Variable { my_lexer::i32 name; }; 
+    struct Array    { my_lexer::i32 name; std::vector<Expr> size; }; // size is Expr since it covers both MathOp and IntLiteral.
+                                                                     // semantic check in codegen (declaration v. access).
+                                                                     // vector bc cycle between Expr and Array (infinite recursion since Expr variant of Array).
+
     struct Expr : public Var<IntLiteral, MathOp, Variable, Array> { using Var<IntLiteral, MathOp, Variable, Array>::Var; };
     
     struct Stmt;
