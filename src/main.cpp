@@ -10,7 +10,7 @@
 // into the binary.  
 // Using 'u8' to store raw bytes of chars of the embedded file since using latin-1 intepretation.
 static my_lexer::u8 test_case[] = {
-    #embed "../tests/variables.c"
+    #embed "../tests/system_library.c"
     ,0
 };
 

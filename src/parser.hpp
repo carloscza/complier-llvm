@@ -36,7 +36,19 @@ namespace my_parser
                                                                      // semantic check in codegen (declaration v. access).
                                                                      // vector bc cycle between Expr and Array (infinite recursion since Expr variant of Array).
 
-    struct Expr : public Var<IntLiteral, MathOp, Variable, Array> { using Var<IntLiteral, MathOp, Variable, Array>::Var; };
+    
+    
+
+
+    /*
+    PRIMARY -> id '(' EXPR (',' EXPR)* ')'
+    */
+    struct FnCall { my_lexer::i32 name; std::vector<Expr> args; }; // function calls produce values thus expression.
+    
+
+
+
+    struct Expr : public Var<IntLiteral, MathOp, Variable, Array, FnCall> { using Var<IntLiteral, MathOp, Variable, Array, FnCall>::Var; };
     
     struct Stmt;
 
@@ -51,10 +63,32 @@ namespace my_parser
     struct Let { Expr body; };
     struct Assign { Expr lhs, rhs; };
 
-    struct Stmt : public Var<Block, Break, Continue, Loop, If, Nop, Expr, Let, Assign> {
-        using Var<Block, Break, Continue, Loop, If, Nop, Expr, Let ,Assign>::Var;
+
+
+    /*
+    STMT -> 'return' EXPR ';'
+    */
+   struct Return { Expr value; }; // return stmt can have a value or without a value.
+
+
+
+    struct Stmt : public Var<Block, Break, Continue, Loop, If, Nop, Expr, Let, Assign, Return> {
+        using Var<Block, Break, Continue, Loop, If, Nop, Expr, Let ,Assign, Return>::Var;
     };
-    struct Program { std::vector<Stmt> body; };
+
+
+
+    /*
+    FUNCTION -> id '(' var (',' var)* ')' BLOCK
+    */
+   struct Func { my_lexer::i32 name; std::vector<Expr> params; Block body; }; // params variable or array (value).
+
+
+
+    /*
+    PROGRAM -> FUNCTION*
+    */
+    struct Program { std::vector<Func> body; }; // a collection of functions.
 
     struct Parser
     {
@@ -75,12 +109,42 @@ namespace my_parser
         private:
             my_lexer::Lexer lex;
 
+
+
+            /*
+            PROGRAM -> FUNCTION*
+            */
             Program parse_program()
             {
                 Program p;
-                while(*lex) { p.body.push_back(parse_stmt()); }
-                return p;
+                while(*lex) { p.body.push_back(parse_function()); } // FUNCTION*
+                return p;                                           // generate struct Program {body}
             }
+            
+
+
+
+            /*
+            FUNCTION -> id '(' var (',' var)* ')' BLOCK
+            */
+            Func parse_function()
+            {
+                my_lexer::i32 name = expect('id');             // id
+                std::vector<Expr> params;
+                expect('(');                                   // '('
+                while (*lex != ')')                            // while params (get vars)
+                {
+                    params.push_back(parse_variable());        // var (generate var structs)
+                    if (*lex != ',') { break ; }               // if no more vars, break.
+                    ++lex;                                     // get next param var.
+                }
+                expect(')');                                   // ')'
+                Block body = parse_block();                    // BLOCK (stmts or empty. parse_block() handles).
+                return {name, std::move(params), std::move(body)};       // generate struc func {name, params, body}
+            }
+
+
+
 
             // BLOCK -> '{' STMT* '}'
             Block parse_block()
@@ -102,11 +166,18 @@ namespace my_parser
                 |  EXPR ';'
                 | 'let' VARIABLE ';'
                 |  EXPR '=' EXPR ';'
+                |  'return' EXPR ';'
             */
             Stmt parse_stmt() 
             {
                 switch(*lex)
                 {
+                    case 'ret': {
+                        ++lex;                         // eat 'ret'/'return'
+                        Expr val = parse_expr();       // EXPR
+                        expect(';');                   // ';'
+                        return Return{move(val)};      // generate struct return {val}
+                    } break;
                     case 'brk':  { ++lex; expect(';'); return Break{};    } break; // 'break' ';'
                     case 'cont': { ++lex; expect(';'); return Continue{}; } break; // 'continue' ';'
                     case 'loop': { ++lex; return Loop{parse_block()};     } break; // 'loop' BLOCK
@@ -143,6 +214,8 @@ namespace my_parser
                 }
             }
 
+
+
             Expr parse_expr() { return parse_or(); }
 
 
@@ -170,9 +243,40 @@ namespace my_parser
             PRIMARY -> INT
                     |  VARIABLE            
                     |  '(' EXPR ')'
+                    |  id '(' EXPR (',' EXPR)* ')'
+                    |  id ('[' EXPR ']')?
             */
             Expr parse_primary()
             {
+                if('id' == *lex) 
+                {
+                    my_lexer::i32 name = expect('id');  // eat id
+                    if(*lex == '(')                        // '('
+                    {
+                        ++lex;
+                        std::vector<Expr> args;
+                        while (*lex != ')')                // while theres args (expr)
+                        {
+                            args.push_back(parse_expr());  // EXPR
+                            if (*lex != ',') { break; }    // if no more args break
+                            ++lex;                         // get rest of args
+                        }
+                        expect(')');                       // ')'
+                        return FnCall{name, move(args)};   // generate struct FnCall {name, args} 
+                    }
+
+                    // indexing case:
+                    if (*lex == '[')                       // '['
+                    {
+                        ++lex;
+                        auto size = parse_expr();          // EXPR
+                        expect(']');                       // ']'
+                        return Array{name, {move(size)}};  // generate struct Array {name, expr}
+                    }
+                    
+                    // or var:
+                    return Variable{name};                 // VARIABLE
+                }
                 if ('(' == *lex)
                 {
                     ++lex;
@@ -180,7 +284,6 @@ namespace my_parser
                     expect(')');
                     return res;                                   // EXPR
                 }
-                if ('id' == *lex) { return parse_variable(); }    // VARIABLE
                 return IntLiteral{expect('int')};                 // INT
             }
 

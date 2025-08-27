@@ -33,7 +33,9 @@ namespace llvm
 
         ~Compiler()
         {
-            builder.CreateRet(builder.getInt32(0));
+            // have function now...no need...
+            // users write returns now..
+            // builder.CreateRet(builder.getInt32(0));
 
             if constexpr (true) { mod.print(outs(), 0); }
 
@@ -104,7 +106,97 @@ namespace llvm
                 return res;
             }
 
-            void gen_prog(my_parser::Program& p) { for(auto& s : p.body) { gen_stmt(s); } }
+
+            void gen_prog(my_parser::Program& p) { for(auto& f : p.body) { gen_function(f); } }
+
+
+
+            // struct Func { my_lexer::i32 name; std::vector<Expr> params; Block body; }; // params variable or array (value).
+            // struct Variable { my_lexer::i32 name; }; 
+            void gen_function(my_parser::Func& f)
+            {
+                //{ 
+                //    FunctionType* sig = FunctionType::get(Type::getInt32Ty(ctx), {}, false);
+                //    functions["main"] = Function::Create(sig, GlobalValue::ExternalLinkage, "main", mod);
+                //    BasicBlock *block = BasicBlock::Create(ctx, "entry", functions["main"]);
+                //    builder.SetInsertPoint(block);
+                //}
+
+
+                // std::unordered_map<std::string, Function *> functions; (tracking functions with strings).
+
+                // struct Func { my_lexer::i32 name; std::vector<Expr> params; Block body; };
+                // get the name of function 
+                std::string name = std::string(my_lexer::ids[f.name]);
+
+
+                std::vector<Type *> parameters_types; // need to pass data type of params to function.
+                std::vector<my_lexer::i32> parameter_names; // get name of params.
+
+                // Need to determine data type of params and names
+                for (auto& param_expr : f.params)
+                {
+                    param_expr (
+                        // its a variable so type is i32: eg, fn(a)
+                        [&](my_parser::Variable& v) { 
+                            parameters_types.push_back(builder.getInt32Ty());
+                            parameter_names.push_back(v.name);
+                        },
+                        // its an array so type is a pointer: eg, fn(a[4])
+                        [&](my_parser::Array& arr) {
+                            parameters_types.push_back(builder.getPtrTy()); // llvm handles ptrs for us.
+                            parameter_names.push_back(arr.name);
+                        },
+                        // default (other)
+                        [&](auto&){ ABORT("Parser made an error with parameter types."); }
+                    );
+                }
+
+                 
+
+
+                // We need to know the function's type. For this lang, its always a i32.
+                FunctionType* sig = FunctionType::get(Type::getInt32Ty(ctx), parameters_types, false);
+                                                //   (return type, param type, isVarArg)
+
+                // We now have param types, and function's type so we can create funciton
+                // We map it to name in functions map.
+                functions[name] = Function::Create(sig, GlobalValue::ExternalLinkage, name, mod);
+
+                // Create a basic block for funciton:
+                // Create an entry for function
+                BasicBlock *entry_block = BasicBlock::Create(ctx, "entry", functions[name]);
+
+                builder.SetInsertPoint(entry_block); // move builder entry func bb.
+
+                // create/push scope for function into stack of scopes.
+                ++symbols;
+                {
+                    // inject params in function's scope
+
+                    size_t i = 0;
+                    for (Argument& arg : functions[name]->args())
+                    {
+                        if (arg.getType() == builder.getInt32Ty())
+                        {
+                            AllocaInst *alloca = builder.CreateAlloca(builder.getInt32Ty(), nullptr, "");
+                            builder.CreateStore(&arg, alloca);
+                            symbols.push(parameter_names[i], alloca, false);
+                        }
+                        else
+                        {
+                            symbols.push(parameter_names[i], &arg, true);
+                        }
+                        ++i;
+                    }
+
+                }
+                for (auto& s : f.body.body) { gen_stmt(s); }
+                --symbols;
+            }
+
+
+
 
 
             void gen_stmt(my_parser::Stmt& s) 
@@ -118,6 +210,7 @@ namespace llvm
                 };
                 s(
                     gen_block,
+                    [&](my_parser::Return& ret) { builder.CreateRet(gen_expr(ret.value)); }, // create return IR using ret's value.
                     [&](my_parser::Let& let) { // Generate IR for 'let' stmts.
                         let.body(
                             [&](my_parser::Variable& v) {
@@ -208,23 +301,74 @@ namespace llvm
                     },
                     [&](my_parser::Nop& stmt){},
                     [&](my_parser::Expr& expr){
-                        builder.CreateCall(functions["printf"], {get_fmt("%d\n"), gen_expr(expr)});
+                        //builder.CreateCall(functions["printf"], {get_fmt("%d\n"), gen_expr(expr)});
+                        gen_expr(expr);
                     }
                 );
             }
 
             void setup()
             {
-                {
-                    FunctionType* sig = FunctionType::get(Type::getInt32Ty(ctx), {}, false);
-                    functions["main"] = Function::Create(sig, GlobalValue::ExternalLinkage, "main", mod);
-                    BasicBlock *block = BasicBlock::Create(ctx, "entry", functions["main"]);
-                    builder.SetInsertPoint(block);
-                }
+                //  Setup main() before lang had functions (manually create one)
+                //  users now create the main().
+                //{ 
+                //    FunctionType* sig = FunctionType::get(Type::getInt32Ty(ctx), {}, false);
+                //    functions["main"] = Function::Create(sig, GlobalValue::ExternalLinkage, "main", mod);
+                //    BasicBlock *block = BasicBlock::Create(ctx, "entry", functions["main"]);
+                //    builder.SetInsertPoint(block);
+                //}
 
                 {
                     FunctionType* sig = FunctionType::get(Type::getInt32Ty(ctx), {builder.getPtrTy()}, true);
                     functions["printf"] = Function::Create(sig, GlobalValue::ExternalLinkage, "printf", mod);
+                }
+                {
+                    FunctionType* sig = FunctionType::get(Type::getInt32Ty(ctx), {builder.getPtrTy()}, true);
+                    functions["scanf"] = Function::Create(sig, GlobalValue::ExternalLinkage, "scanf", mod);
+                }
+
+                { // write(num)
+                    FunctionType* sig = FunctionType::get(Type::getInt32Ty(ctx), builder.getInt32Ty(), false);
+                                                    //   (return type i32, param type i32, isVarArg)
+                    functions["write"] = Function::Create(sig, GlobalValue::InternalLinkage, "write", mod);
+
+                    // Create bb for write function
+                    BasicBlock *bb = BasicBlock::Create(ctx, "entry", functions["write"]);
+                    builder.SetInsertPoint(bb);
+
+                    // our run env will use existing. hand it to printf. 
+                    builder.CreateCall(functions["printf"], {get_fmt("%d"), functions["write"]->getArg(0)}); // link to printf and pass it write()'s arg to it
+                    builder.CreateRet(builder.getInt32(0)); // return for write. just 0.
+                }
+
+                { // putch(num)
+                    FunctionType* sig = FunctionType::get(Type::getInt32Ty(ctx), builder.getInt32Ty(), false);
+                                                    //   (return type i32, param type i32, isVarArg)
+                    functions["putch"] = Function::Create(sig, GlobalValue::InternalLinkage, "putch", mod);
+
+                    // Create bb for write function
+                    BasicBlock *bb = BasicBlock::Create(ctx, "entry", functions["putch"]);
+                    builder.SetInsertPoint(bb);
+
+                    // our run env will use existing. hand it to printf. 
+                    builder.CreateCall(functions["printf"], {get_fmt("%c"), functions["putch"]->getArg(0)}); // link to printf and pass it write()'s arg to it
+                    builder.CreateRet(builder.getInt32(0)); // return for write. just 0.
+                }
+
+                { // read()
+                    FunctionType* sig = FunctionType::get(Type::getInt32Ty(ctx), {}, false);
+                                                    //   (return type i32, param type none, isVarArg)
+                    functions["read"] = Function::Create(sig, GlobalValue::InternalLinkage, "read", mod);
+
+                    // Create bb for write function
+                    BasicBlock *bb = BasicBlock::Create(ctx, "entry", functions["read"]);
+                    builder.SetInsertPoint(bb);
+
+                    Value *ptr = builder.CreateAlloca(builder.getInt32Ty(), nullptr, "");
+                    builder.CreateCall(functions["scanf"], {get_fmt("%d"), ptr});
+
+                    Value *value = builder.CreateLoad(builder.getInt32Ty(), ptr);
+                    builder.CreateRet(value);
                 }
             }
 
@@ -241,10 +385,25 @@ namespace llvm
             Value* gen_expr(my_parser::Expr& e)
             {
                 return e (
+                    [&](my_parser::FnCall& call) -> Value * {
+                        Function *fn = functions[std::string(my_lexer::ids[call.name])]; // get function from functions map.
+                        if(!fn) { ABORT ("Tried to call undeclared function"); } // func with that name does not exists.
+
+                        std::vector<Value *> args;
+                        for (auto& arg : call.args) { args.push_back(gen_expr(arg)); } // get args for IR.
+
+                        return builder.CreateCall(fn, args); // create func call IR.
+                    },
                     [&](my_parser::Variable& v) -> Value * { // Expr is variable
                         auto symbol = symbols[v.name]; // check if var exists/declared
-                        if(symbol.is_array) { ABORT("We're not going to allow pointer math, simplifies our type system"); } // variable actually an array so it would be mem address (pointer). not allowed in lang.
-                        return builder.CreateLoad(builder.getInt32Ty(), symbol.alloca); // load value of variable to register.
+                        if(symbol.is_array) 
+                        {
+                            return symbol.alloca; // return ptr address.
+                        } 
+                        else
+                        {
+                            return builder.CreateLoad(builder.getInt32Ty(), symbol.alloca); // load value of variable to register.
+                        }
                     },
                     [&](my_parser::Array& arr) -> Value * { // Expr is an array
                         auto symbol = symbols[arr.name]; // check if exists
